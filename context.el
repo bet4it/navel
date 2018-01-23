@@ -12,8 +12,10 @@
 (defconst navel-function-definition-name "*Function Definition*")
 
 (defvar navel--timer nil)
+(defvar navel--context-map (make-sparse-keymap))
 
 (defvar context-base-buffer nil)
+(defvar context-base-point nil)
 
 (defvar edit-window-buffer-list nil)
 
@@ -47,30 +49,44 @@
     (setq navel--timer nil)))
 
 (defun navel-update ()
-  (let ((func-name (funcall navel-get-symbol)))
-    (navel-display-symbol-context func-name)))
+  (when (equal (purpose-window-purpose (selected-window)) 'edit)
+    (let ((func-name (funcall navel-get-symbol)))
+      (navel-display-symbol-context func-name))))
 
 (defun navel-display-symbol-context (symb)
-  (let ((buffer-point (condition-case nil
+  (let ((context-same-buffer t)
+        (buffer-point (condition-case nil
                           (save-excursion
                             (save-window-excursion
-                             (funcall navel-find-symbol symb)
-                             (cons (current-buffer) (point))))
+                              (funcall navel-find-symbol symb)
+                              (cons (current-buffer) (point))))
                         (error nil))))
     (when buffer-point
       (unless (equal context-base-buffer (car buffer-point))
+        (setq context-same-buffer nil)
         (when context-base-buffer
-            (kill-buffer navel-function-definition-name)
-            (unless (member context-base-buffer edit-window-buffer-list)
-              (kill-buffer context-base-buffer)
-              (setq context-base-buffer nil)))
+          (kill-buffer navel-function-definition-name)
+          (unless (member context-base-buffer edit-window-buffer-list)
+            (kill-buffer context-base-buffer)
+            (setq context-base-buffer nil)))
         (save-window-excursion
           (setq context-base-buffer (car buffer-point))
           (make-indirect-buffer context-base-buffer navel-function-definition-name t)))
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
-        (goto-char (cdr buffer-point))
-        (recenter 0)))))
+        (use-local-map navel--context-map)
+        (unless (and context-base-buffer
+                     (equal context-base-point (cdr buffer-point)))
+          (setq context-base-point (cdr buffer-point))
+          (goto-char context-base-point)
+          (recenter 2))))))
+
+(defun navel-sync-context-to-edit ()
+  (interactive)
+  (switch-to-buffer context-base-buffer)
+  (goto-char context-base-point)
+  (recenter 6)
+  (add-to-list 'edit-window-buffer-list (current-buffer)))
 
 (defun navel-context-init ()
   (interactive)
@@ -79,5 +95,8 @@
   (add-to-list 'purpose-user-name-purposes
                (cons navel-function-definition-name 'navel-context))
   (purpose-compile-user-configuration)
+
+  (define-key navel--context-map
+    (kbd "<double-down-mouse-1>") 'navel-sync-context-to-edit)
 
   (add-to-list 'edit-window-buffer-list (current-buffer)))
