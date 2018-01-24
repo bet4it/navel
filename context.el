@@ -35,23 +35,16 @@
          (prog1 (set-default sym val)
            (when navel--timer (navel-start-timer)))))
 
-(defun navel-start-timer ()
-  (interactive)
-  (navel-stop-timer)
-  (setq navel--timer
-        (run-with-idle-timer navel-idle-update-delay t
-                             #'navel-update)))
-
-(defun navel-stop-timer ()
-  (interactive)
-  (when navel--timer
-    (cancel-timer navel--timer)
-    (setq navel--timer nil)))
-
 (defun navel-update ()
-  (when (equal (purpose-window-purpose (selected-window)) 'edit)
-    (let ((func-name (funcall navel-get-symbol)))
-      (navel-display-symbol-context func-name))))
+  (let ((func-name (funcall navel-get-symbol)))
+    (navel-display-symbol-context func-name)))
+
+(defun navel-schedule-timer ()
+  (or (and navel--timer
+           (memq navel--timer timer-idle-list))
+      (setq navel--timer
+            (run-with-idle-timer navel-idle-update-delay nil
+                                 #'navel-update))))
 
 (defun navel-display-symbol-context (symb)
   (let ((context-same-buffer t)
@@ -100,3 +93,15 @@
     (kbd "<double-down-mouse-1>") 'navel-sync-context-to-edit)
 
   (add-to-list 'edit-window-buffer-list (current-buffer)))
+
+;;;###autoload
+(define-minor-mode navel-edit-minor-mode nil
+  :group 'navel
+  (cond
+   ((not (equal (purpose-window-purpose (selected-window)) 'edit))
+    (message "navel-edit-minor-mode can only be enabled in edit window")
+    (setq navel-edit-minor-mode nil))
+   (navel-edit-minor-mode
+    (add-hook 'post-command-hook #'navel-schedule-timer))
+   (t
+    (remove-hook 'post-command-hook #'navel-schedule-timer))))
