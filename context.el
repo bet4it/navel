@@ -36,8 +36,9 @@
            (when navel--timer (navel-start-timer)))))
 
 (defun navel-update ()
-  (let ((func-name (funcall navel-get-symbol)))
-    (navel-display-symbol-context func-name)))
+  (when navel-edit-minor-mode
+    (let ((func-name (funcall navel-get-symbol)))
+      (navel-display-symbol-context func-name))))
 
 (defun navel-schedule-timer ()
   (or (and navel--timer
@@ -51,8 +52,9 @@
         (buffer-point (condition-case nil
                           (save-excursion
                             (save-window-excursion
-                              (funcall navel-find-symbol symb)
-                              (cons (current-buffer) (point))))
+                              (let ((recentf-exclude '((lambda (f) t))))
+                                (funcall navel-find-symbol symb)
+                                (cons (current-buffer) (point)))))
                         (error nil))))
     (when buffer-point
       (unless (equal context-base-buffer (car buffer-point))
@@ -68,7 +70,7 @@
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
         (use-local-map navel--context-map)
-        (unless (and context-base-buffer
+        (unless (and context-same-buffer
                      (equal context-base-point (cdr buffer-point)))
           (setq context-base-point (cdr buffer-point))
           (goto-char context-base-point)
