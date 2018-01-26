@@ -19,12 +19,29 @@
 
 (defvar edit-window-buffer-list nil)
 
-(defvar navel-get-symbol 'function-called-at-point)
-(defvar navel-find-symbol (lambda (symb-name)
-                            (let ((buffer-point
-                                   (find-function-noselect symb-name t)))
-                              (switch-to-buffer (car buffer-point) t)
-                              (goto-char (cdr buffer-point)))))
+(defvar navel-get-context 'navel-elisp-get-func)
+
+(defun navel-elisp-get-func ()
+  (let* ((recentf-exclude '((lambda (f) t)))
+         (func-symb (elisp--current-symbol)))
+    (or (condition-case nil
+            (save-excursion
+              (find-function-noselect func-symb t))
+          (error nil))
+        (let* ((temp-buf (get-buffer-create " *Navel Temp*"))
+               (standard-output temp-buf))
+          (condition-case nil
+              (funcall #'(lambda (help-str)
+                           (with-current-buffer temp-buf
+                             (erase-buffer)
+                             (insert help-str)
+                             (goto-char 0)
+                             (cons (current-buffer) nil)))
+                       (with-output-to-string
+                         (prin1 func-symb)
+                         (princ " is ")
+                         (describe-function-1 func-symb)))
+            (error nil))))))
 
 (defcustom navel-idle-update-delay idle-update-delay
   "Idle time delay before automatically updating the context buffer."
@@ -35,11 +52,6 @@
          (prog1 (set-default sym val)
            (when navel--timer (navel-start-timer)))))
 
-(defun navel-update ()
-  (when navel-edit-minor-mode
-    (let ((func-name (funcall navel-get-symbol)))
-      (navel-display-symbol-context func-name))))
-
 (defun navel-schedule-timer ()
   (or (and navel--timer
            (memq navel--timer timer-idle-list))
@@ -47,15 +59,13 @@
             (run-with-idle-timer navel-idle-update-delay nil
                                  #'navel-update))))
 
-(defun navel-display-symbol-context (symb)
-  (let ((context-same-buffer t)
-        (buffer-point (condition-case nil
-                          (save-excursion
-                            (save-window-excursion
-                              (let ((recentf-exclude '((lambda (f) t))))
-                                (funcall navel-find-symbol symb)
-                                (cons (current-buffer) (point)))))
-                        (error nil))))
+(defun navel-update ()
+  (and navel-edit-minor-mode
+       (eldoc--message-command-p last-command)
+       (navel-display-context (funcall navel-get-context))))
+
+(defun navel-display-context (buffer-point)
+  (let ((context-same-buffer t))
     (when buffer-point
       (unless (equal context-base-buffer (car buffer-point))
         (setq context-same-buffer nil)
@@ -69,12 +79,13 @@
           (make-indirect-buffer context-base-buffer navel-function-definition-name t)))
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
-        (use-local-map navel--context-map)
-        (unless (and context-same-buffer
-                     (equal context-base-point (cdr buffer-point)))
-          (setq context-base-point (cdr buffer-point))
-          (goto-char context-base-point)
-          (recenter 2))))))
+        (setq context-base-point (cdr buffer-point))
+        (when (cdr buffer-point)
+          (use-local-map navel--context-map)
+          (unless (and context-same-buffer
+                       (equal context-base-point (cdr buffer-point)))
+            (goto-char context-base-point)
+            (recenter 2)))))))
 
 (defun navel-sync-context-to-edit ()
   (interactive)
