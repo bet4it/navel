@@ -21,6 +21,18 @@
 
 (defvar navel-get-context 'navel-elisp-get-func)
 
+(defvar navel-tool-bar-map
+  (let ((map (make-sparse-keymap)))
+    (tool-bar-local-item "left-arrow" 'evil-jump-backward 'Backward map
+                         :vert-only t)
+    (tool-bar-local-item "right-arrow" 'evil-jump-forward 'Forward map
+                         :vert-only t)
+    (tool-bar-local-item "prev-node" 'spacemacs/enter-ahs-backward 'PrevSymb map
+                         :vert-only t)
+    (tool-bar-local-item "next-node" 'spacemacs/enter-ahs-forward 'NextSymb map
+                         :vert-only t)
+    map))
+
 (defun navel-elisp-get-func ()
   (let* ((recentf-exclude '((lambda (f) t)))
          (func-symb (elisp--current-symbol)))
@@ -79,19 +91,21 @@
           (make-indirect-buffer context-base-buffer navel-function-definition-name t)))
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
-        (setq context-base-point (cdr buffer-point))
         (when (cdr buffer-point)
           (use-local-map navel--context-map)
           (unless (and context-same-buffer
                        (equal context-base-point (cdr buffer-point)))
-            (goto-char context-base-point)
-            (recenter 2)))))))
+            (goto-char (cdr buffer-point))
+            (recenter 2)))
+        (setq context-base-point (cdr buffer-point))))))
 
 (defun navel-sync-context-to-edit ()
   (interactive)
   (switch-to-buffer context-base-buffer)
   (goto-char context-base-point)
   (recenter 6)
+  (navel-edit-minor-mode t)
+  (set (make-local-variable 'tool-bar-map) navel-tool-bar-map)
   (add-to-list 'edit-window-buffer-list (current-buffer)))
 
 (defun navel-context-init ()
@@ -115,6 +129,8 @@
     (message "navel-edit-minor-mode can only be enabled in edit window")
     (setq navel-edit-minor-mode nil))
    (navel-edit-minor-mode
+    (set (make-local-variable 'tool-bar-map) navel-tool-bar-map)
     (add-hook 'post-command-hook #'navel-schedule-timer))
    (t
+    (kill-local-variable 'tool-bar-map)
     (remove-hook 'post-command-hook #'navel-schedule-timer))))
