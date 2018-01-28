@@ -15,17 +15,20 @@
 (defvar navel--context-map (make-sparse-keymap))
 
 (defvar context-base-buffer nil)
-(defvar context-base-point nil)
+(defvar context-base-marker nil)
 
 (defvar edit-window-buffer-list nil)
+
+(defvar navel--jumplist-list '())
+(defvar navel--jumplist-idx 0)
 
 (defvar navel-get-context 'navel-elisp-get-func)
 
 (defvar navel-tool-bar-map
   (let ((map (make-sparse-keymap)))
-    (tool-bar-local-item "left-arrow" 'evil-jump-backward 'Backward map
+    (tool-bar-local-item "left-arrow" 'navel-jumplist-backward 'Backward map
                          :vert-only t)
-    (tool-bar-local-item "right-arrow" 'evil-jump-forward 'Forward map
+    (tool-bar-local-item "right-arrow" 'navel-jumplist-forward 'Forward map
                          :vert-only t)
     (tool-bar-local-item "prev-node" 'spacemacs/enter-ahs-backward 'PrevSymb map
                          :vert-only t)
@@ -38,7 +41,8 @@
          (func-symb (elisp--current-symbol)))
     (or (condition-case nil
             (save-excursion
-              (find-function-noselect func-symb t))
+              (let ((buffer-point (find-function-noselect func-symb t)))
+                (set-marker (point-marker) (cdr buffer-point) (car buffer-point))))
           (error nil))
         (let* ((temp-buf (get-buffer-create " *Navel Temp*"))
                (standard-output temp-buf))
@@ -48,7 +52,7 @@
                              (erase-buffer)
                              (insert help-str)
                              (goto-char 0)
-                             (cons (current-buffer) nil)))
+                             (current-buffer)))
                        (with-output-to-string
                          (prin1 func-symb)
                          (princ " is ")
@@ -76,10 +80,18 @@
        (eldoc--message-command-p last-command)
        (navel-display-context (funcall navel-get-context))))
 
-(defun navel-display-context (buffer-point)
-  (let ((context-same-buffer t))
-    (when buffer-point
-      (unless (equal context-base-buffer (car buffer-point))
+(defun navel-display-context (marker-or-buffer)
+  (let ((context-same-buffer t)
+        (next-buffer (cond ((markerp marker-or-buffer)
+                            (marker-buffer marker-or-buffer))
+                           ((bufferp marker-or-buffer)
+                            marker-or-buffer)
+                           (t nil)))
+        (next-point (if (markerp marker-or-buffer)
+                        (marker-position marker-or-buffer)
+                      nil)))
+    (when next-buffer
+      (unless (equal context-base-buffer next-buffer)
         (setq context-same-buffer nil)
         (when context-base-buffer
           (kill-buffer navel-function-definition-name)
@@ -87,26 +99,51 @@
             (kill-buffer context-base-buffer)
             (setq context-base-buffer nil)))
         (save-window-excursion
-          (setq context-base-buffer (car buffer-point))
+          (setq context-base-buffer next-buffer)
           (make-indirect-buffer context-base-buffer navel-function-definition-name t)))
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
-        (when (cdr buffer-point)
+        (when next-point
           (use-local-map navel--context-map)
           (unless (and context-same-buffer
-                       (equal context-base-point (cdr buffer-point)))
-            (goto-char (cdr buffer-point))
+                       (equal context-base-marker marker-or-buffer))
+            (goto-char next-point)
             (recenter 2)))
-        (setq context-base-point (cdr buffer-point))))))
+        (setq context-base-marker marker-or-buffer)))))
 
 (defun navel-sync-context-to-edit ()
   (interactive)
   (switch-to-buffer context-base-buffer)
-  (goto-char context-base-point)
+  (goto-char context-base-marker)
   (recenter 6)
+  (navel-jumplist-push-pos)
   (navel-edit-minor-mode t)
   (set (make-local-variable 'tool-bar-map) navel-tool-bar-map)
   (add-to-list 'edit-window-buffer-list (current-buffer)))
+
+(defun navel-jumplist-push-pos ()
+  (setq navel--jumplist-list
+        (nthcdr navel--jumplist-idx navel--jumplist-list))
+  (setq navel--jumplist-idx 0)
+  (push (point-marker) navel--jumplist-list))
+
+(defun navel-jumplist-jump-idx (idx)
+  (let ((jumplist-curr (nth idx navel--jumplist-list)))
+    (and (marker-buffer jumplist-curr)
+         (switch-to-buffer (marker-buffer jumplist-curr))
+         (goto-char jumplist-curr))))
+
+(defun navel-jumplist-backward ()
+  (interactive)
+  (when (< navel--jumplist-idx (- (length navel--jumplist-list) 1))
+    (setq navel--jumplist-idx (+ navel--jumplist-idx 1))
+    (navel-jumplist-jump-idx navel--jumplist-idx)))
+
+(defun navel-jumplist-forward ()
+  (interactive)
+  (when (> navel--jumplist-idx 0)
+    (setq navel--jumplist-idx (- navel--jumplist-idx 1))
+    (navel-jumplist-jump-idx navel--jumplist-idx)))
 
 (defun navel-context-init ()
   (interactive)
@@ -119,7 +156,8 @@
   (define-key navel--context-map
     (kbd "<double-down-mouse-1>") 'navel-sync-context-to-edit)
 
-  (add-to-list 'edit-window-buffer-list (current-buffer)))
+  (add-to-list 'edit-window-buffer-list (current-buffer))
+  (navel-jumplist-push-pos))
 
 ;;;###autoload
 (define-minor-mode navel-edit-minor-mode nil
