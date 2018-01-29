@@ -14,8 +14,8 @@
 (defvar navel--timer nil)
 (defvar navel--context-map (make-sparse-keymap))
 
-(defvar context-base-buffer nil)
-(defvar context-base-marker nil)
+(defvar context-orig-pos nil)
+(defvar context-base-pos nil)
 
 (defvar edit-window-buffer-list nil)
 
@@ -78,54 +78,57 @@
 (defun navel-update ()
   (and navel-edit-minor-mode
        (eldoc--message-command-p last-command)
-       (navel-display-context (funcall navel-get-context))))
+       (navel-display-context (funcall navel-get-context))
+       (setq context-orig-pos (point-marker))))
 
-(defun navel-display-context (marker-or-buffer)
+(defun navel-position-get-buffer (position)
+  (cond ((markerp position) (marker-buffer position))
+        ((bufferp position) position)
+        (t nil)))
+
+(defun navel-display-context (position)
   (let ((context-same-buffer t)
-        (next-buffer (cond ((markerp marker-or-buffer)
-                            (marker-buffer marker-or-buffer))
-                           ((bufferp marker-or-buffer)
-                            marker-or-buffer)
-                           (t nil)))
-        (next-point (if (markerp marker-or-buffer)
-                        (marker-position marker-or-buffer)
-                      nil)))
-    (when next-buffer
-      (unless (equal context-base-buffer next-buffer)
+        (new-buffer (navel-position-get-buffer position))
+        (new-point (and (markerp position)
+                         (marker-position position)))
+        (context-base-buffer (navel-position-get-buffer context-base-pos)))
+    (when new-buffer
+      (unless (equal context-base-buffer new-buffer)
         (setq context-same-buffer nil)
         (when context-base-buffer
           (kill-buffer navel-function-definition-name)
           (unless (member context-base-buffer edit-window-buffer-list)
-            (kill-buffer context-base-buffer)
-            (setq context-base-buffer nil)))
+            (kill-buffer context-base-buffer)))
         (save-window-excursion
-          (setq context-base-buffer next-buffer)
-          (make-indirect-buffer context-base-buffer navel-function-definition-name t)))
+          (make-indirect-buffer new-buffer navel-function-definition-name t)))
       (save-selected-window
         (switch-to-buffer navel-function-definition-name t)
-        (when next-point
+        (when new-point
           (use-local-map navel--context-map)
           (unless (and context-same-buffer
-                       (equal context-base-marker marker-or-buffer))
-            (goto-char next-point)
+                       (equal context-base-pos position))
+            (goto-char new-point)
             (recenter 2)))
-        (setq context-base-marker marker-or-buffer)))))
+        (setq context-base-pos position))
+      t)))
 
 (defun navel-sync-context-to-edit ()
   (interactive)
-  (switch-to-buffer context-base-buffer)
-  (goto-char context-base-marker)
+  (switch-to-buffer (navel-position-get-buffer context-base-pos))
+  (goto-char context-base-pos)
   (recenter 6)
-  (navel-jumplist-push-pos)
+  (and (markerp context-orig-pos)
+       (navel-jumplist-push-marker context-orig-pos))
+  (navel-jumplist-push-marker (point-marker))
   (navel-edit-minor-mode t)
   (set (make-local-variable 'tool-bar-map) navel-tool-bar-map)
   (add-to-list 'edit-window-buffer-list (current-buffer)))
 
-(defun navel-jumplist-push-pos ()
+(defun navel-jumplist-push-marker (marker)
   (setq navel--jumplist-list
         (nthcdr navel--jumplist-idx navel--jumplist-list))
   (setq navel--jumplist-idx 0)
-  (push (point-marker) navel--jumplist-list))
+  (push marker navel--jumplist-list))
 
 (defun navel-jumplist-jump-idx (idx)
   (let ((jumplist-curr (nth idx navel--jumplist-list)))
@@ -153,11 +156,11 @@
                (cons navel-function-definition-name 'navel-context))
   (purpose-compile-user-configuration)
 
+  (define-key navel--context-map (kbd "<mouse-1>") 'ignore)
   (define-key navel--context-map
     (kbd "<double-down-mouse-1>") 'navel-sync-context-to-edit)
 
-  (add-to-list 'edit-window-buffer-list (current-buffer))
-  (navel-jumplist-push-pos))
+  (add-to-list 'edit-window-buffer-list (current-buffer)))
 
 ;;;###autoload
 (define-minor-mode navel-edit-minor-mode nil
