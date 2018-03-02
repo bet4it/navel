@@ -148,64 +148,15 @@
     (setq navel--jumplist-idx (- navel--jumplist-idx 1))
     (navel-jumplist-jump-idx navel--jumplist-idx)))
 
-(defun navel-close-buffer (buffer)
-  (setq edit-window-buffer-list
-        (delq buffer edit-window-buffer-list))
-  (or (equal buffer
-             (navel-position-get-buffer context-base-pos))
-      (kill-buffer buffer)))
-
-(defun navel-tabbar-line-tab-hook (orig-fun tab)
-  (concat (funcall orig-fun tab)
-          (propertize
-           (with-temp-buffer
-             (insert (make-string 1 #x00D7))
-             (insert " ")
-             (buffer-string))
-           'face (cond ((and (tabbar-selected-p tab (tabbar-current-tabset))
-                             (tabbar-modified-p tab (tabbar-current-tabset)))
-                        'tabbar-selected-modified)
-                       ((tabbar-selected-p tab (tabbar-current-tabset))
-                        'tabbar-selected)
-                       ((tabbar-modified-p tab (tabbar-current-tabset))
-                        'tabbar-modified)
-                       (t 'tabbar-unselected))
-           'pointer 'hand
-           'tabbar-tab tab
-           'local-map (tabbar-make-tab-keymap tab)
-           'tabbar-action 'close-tab)))
-
-(defun navel-tabbar-select-tab-callback-hook (event)
-       (interactive "@e")
-       (when (tabbar-click-p event)
-         (let ((target (posn-string (event-start event))))
-           (tabbar-click-on-tab
-            (get-text-property (cdr target) 'tabbar-tab (car target))
-            event
-            (get-text-property (cdr target) 'tabbar-action (car target))))))
-
-(defun navel-tabbar-click-on-tab-hook (tab &optional type action)
-  (if (eq action 'close-tab)
-      (navel-close-buffer (tabbar-tab-value tab))
-    (when tabbar-select-tab-function
-      (funcall tabbar-select-tab-function
-               (tabbar-make-mouse-event type) tab)
-      (tabbar-display-update))))
-
 (defun navel-tabbar-init ()
-  (require 'tabbar)
-  (setq tabbar-buffer-list-function
-        (lambda () edit-window-buffer-list))
-  (setq tabbar-buffer-groups-function
-        (lambda () (list (symbol-name (purpose-buffer-purpose (current-buffer))))))
-  (setq tabbar-inhibit-functions
-        (list (lambda () (not (equal (purpose-window-purpose (selected-window)) 'edit)))))
-
-  (advice-add 'tabbar-line-tab :around #'navel-tabbar-line-tab-hook)
-  (advice-add 'tabbar-select-tab-callback :override #'navel-tabbar-select-tab-callback-hook)
-  (advice-add 'tabbar-click-on-tab :override #'navel-tabbar-click-on-tab-hook)
-
-  (tabbar-mode))
+  (require 'aquamacs-tabbar)
+  (advice-add 'helm--generic-read-file-name
+              :before-until
+              #'(lambda (&rest args)
+                  (when (next-read-file-uses-dialog-p)
+                    (apply 'read-file-name-default args))))
+  (tabbar-mode)
+  (remove-hook 'first-change-hook 'tabbar-window-update-tabsets-when-idle))
 
 (defun navel-context-init ()
   (interactive)
