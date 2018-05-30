@@ -1,15 +1,4 @@
-(require 'window-purpose)
-
-(defvar navel--horizontal-windoww-layout
-  '(t
-    (0 0 100 67)
-    (:purpose edit :purpose-dedicated t :width 1.00 :height 0.67
-              :edges (0.00 0.00 1.00 0.67))
-    (:purpose navel-context :purpose-dedicated t :width 1.00 :height 0.33
-              :edges (0.00 0.67 1.00 1.00)))
-  "Horizontal window layout for navel")
-
-(defconst navel-function-definition-name "*Function Definition*")
+(require 'cl)
 
 (defvar navel--timer nil)
 (defvar navel--context-map (make-sparse-keymap))
@@ -44,7 +33,7 @@
               (let ((buffer-point (find-function-noselect func-symb t)))
                 (set-marker (point-marker) (cdr buffer-point) (car buffer-point))))
           (error nil))
-        (let* ((temp-buf (get-buffer-create " *Navel Temp*"))
+        (let* ((temp-buf (get-buffer-create (concat "doc:" (symbol-name func-symb))))
                (standard-output temp-buf))
           (condition-case nil
               (funcall #'(lambda (help-str)
@@ -57,7 +46,7 @@
                          (prin1 func-symb)
                          (princ " is ")
                          (describe-function-1 func-symb)))
-            (error nil))))))
+            (error (kill-buffer temp-buf)))))))
 
 (defcustom navel-idle-update-delay idle-update-delay
   "Idle time delay before automatically updating the context buffer."
@@ -87,22 +76,24 @@
         (t nil)))
 
 (defun navel-display-context (position)
-  (let ((context-same-buffer t)
-        (new-buffer (navel-position-get-buffer position))
-        (new-point (and (markerp position)
-                        (marker-position position)))
-        (context-base-buffer (navel-position-get-buffer context-base-pos)))
+  (let* ((context-same-buffer t)
+         (new-buffer (navel-position-get-buffer position))
+         (new-buffer-name (concat " " (buffer-name new-buffer)))
+         (new-point (and (markerp position)
+                         (marker-position position)))
+         (context-window (navel-window-get 'context))
+         (context-base-buffer (navel-position-get-buffer context-base-pos)))
     (when new-buffer
       (unless (equal context-base-buffer new-buffer)
         (setq context-same-buffer nil)
         (when context-base-buffer
-          (kill-buffer navel-function-definition-name)
+          (kill-buffer (window-buffer context-window))
           (unless (member context-base-buffer edit-window-buffer-list)
             (kill-buffer context-base-buffer)))
         (save-window-excursion
-          (make-indirect-buffer new-buffer navel-function-definition-name t)))
-      (save-selected-window
-        (switch-to-buffer navel-function-definition-name t)
+          (make-indirect-buffer new-buffer new-buffer-name t)))
+      (with-selected-window context-window
+        (switch-to-buffer new-buffer-name t t)
         (when new-point
           (use-local-map navel--context-map)
           (unless (and context-same-buffer
@@ -114,7 +105,8 @@
 
 (defun navel-sync-context-to-edit ()
   (interactive)
-  (switch-to-buffer (navel-position-get-buffer context-base-pos))
+  (select-window (navel-window-get 'edit))
+  (switch-to-buffer (navel-position-get-buffer context-base-pos) nil t)
   (goto-char context-base-pos)
   (recenter 6)
   (and (markerp context-orig-pos)
@@ -148,6 +140,11 @@
     (setq navel--jumplist-idx (- navel--jumplist-idx 1))
     (navel-jumplist-jump-idx navel--jumplist-idx)))
 
+(defun navel-window-get (type &optional frame)
+  (car (cl-remove-if-not #'(lambda (window)
+                             (eql type (window-parameter window 'navel)))
+                         (window-list frame))))
+
 (defun navel-tabbar-init ()
   (require 'aquamacs-tabbar)
   (advice-add 'helm--generic-read-file-name
@@ -158,13 +155,18 @@
   (tabbar-mode)
   (remove-hook 'first-change-hook 'tabbar-window-update-tabsets-when-idle))
 
+(defun navel-layout-init ()
+  (delete-other-windows)
+  (let ((win0 (selected-window))
+        (win1 (split-window nil ( / ( * (window-height) 3) 4))))
+    (set-window-parameter win0 'navel 'edit)
+    (set-window-parameter win1 'navel 'context)
+    (with-selected-window win0
+      (navel-edit-minor-mode t))))
+
 (defun navel-context-init ()
   (interactive)
-  (purpose-set-window-layout navel--horizontal-windoww-layout)
-
-  (add-to-list 'purpose-user-name-purposes
-               (cons navel-function-definition-name 'navel-context))
-  (purpose-compile-user-configuration)
+  (navel-layout-init)
 
   (define-key navel--context-map (kbd "<mouse-1>") 'ignore)
   (define-key navel--context-map
@@ -177,7 +179,7 @@
 (define-minor-mode navel-edit-minor-mode nil
   :group 'navel
   (cond
-   ((not (equal (purpose-window-purpose (selected-window)) 'edit))
+   ((not (equal (window-parameter (selected-window) 'navel) 'edit))
     (message "navel-edit-minor-mode can only be enabled in edit window")
     (setq navel-edit-minor-mode nil))
    (navel-edit-minor-mode
